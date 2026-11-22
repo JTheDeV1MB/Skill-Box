@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101014">
+  <meta name="description" content="A free, for-fun card, dice, and roulette game demo.">
+  <title>Skill Box — Game Demo</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #ffd447;
+      --panel: #19191f;
+      --muted: #b7b7c2;
+      --green: #84f2a4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: max(16px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+      background: #101014;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { width: min(100%, 520px); margin: 0 auto; }
+    .panel {
+      margin: 12px 0;
+      padding: 18px;
+      border: 1px solid #49422b;
+      border-radius: 18px;
+      background: var(--panel);
+      text-align: center;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.5rem; }
+    h2 { margin: 0 0 12px; font-size: 1.1rem; }
+    p { color: var(--muted); }
+    .stats { display: flex; justify-content: space-around; gap: 12px; }
+    .stat strong { display: block; color: var(--gold); font-size: 1.35rem; }
+    .games { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    button {
+      min-height: 48px;
+      padding: 10px 12px;
+      border: 1px solid #514a35;
+      border-radius: 12px;
+      background: #292931;
+      color: white;
+      font: inherit;
+      font-weight: 700;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 3px solid white; outline-offset: 2px; }
+    button[aria-pressed="true"], .primary {
+      border-color: var(--gold);
+      background: var(--gold);
+      color: #17140a;
+    }
+    .primary { width: 100%; margin-top: 16px; min-height: 56px; font-size: 1.1rem; }
+    .secondary { margin-top: 10px; }
+    #result {
+      display: grid;
+      min-height: 150px;
+      place-items: center;
+      margin: 16px 0 4px;
+      padding: 16px;
+      border-radius: 14px;
+      background: #101014;
+      font-size: clamp(1.3rem, 6vw, 2rem);
+      font-weight: 800;
+    }
+    #message { min-height: 1.5em; margin: 8px 0 0; color: var(--green); }
+    .note { font-size: .85rem; line-height: 1.45; }
+    #installButton { display: none; width: 100%; margin-top: 10px; }
+    @media (max-width: 360px) {
+      .games { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="panel">
+    <h1>🏆 Skill Box</h1>
+    <p>A free, for-fun game demo. No cash prizes or payouts.</p>
+    <div class="stats" aria-label="Game statistics">
+      <div class="stat">Points<strong id="score">0</strong></div>
+      <div class="stat">Rounds<strong id="rounds">0</strong></div>
+      <div class="stat">Best<strong id="best">0</strong></div>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="chooseTitle">
+    <h2 id="chooseTitle">Choose a game</h2>
+    <div class="games">
+      <button type="button" data-game="cards" aria-pressed="true">🃏 Cards</button>
+      <button type="button" data-game="dice" aria-pressed="false">🎲 Dice</button>
+      <button type="button" data-game="roulette" aria-pressed="false">🎡 Roulette</button>
+      <button type="button" data-game="memory" aria-pressed="false">🧠 Memory</button>
+    </div>
+
+    <div id="result" role="status" aria-live="polite">Pick a game and tap PLAY</div>
+    <p id="message" aria-live="polite"></p>
+
+    <button id="playButton" class="primary" type="button">PLAY</button>
+    <button id="installButton" type="button">INSTALL GAME</button>
+    <button id="resetButton" class="secondary" type="button">Reset points</button>
+  </section>
+
+  <footer class="panel note">
+    Points are just a local game score and have no cash value. Your score is saved on this device.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const scoreEl = $("score");
+  const roundsEl = $("rounds");
+  const bestEl = $("best");
+  const resultEl = $("result");
+  const messageEl = $("message");
+  const installButton = $("installButton");
+
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("skillBoxDemo") || "{}"); } catch {}
+  let score = Number(saved.score) || 0;
+  let rounds = Number(saved.rounds) || 0;
+  let best = Number(saved.best) || 0;
+  let selectedGame = "cards";
+  let memoryTarget = null;
+  let deferredInstallPrompt = null;
+
+  function render() {
+    scoreEl.textContent = score;
+    roundsEl.textContent = rounds;
+    bestEl.textContent = best;
+    try {
+      localStorage.setItem("skillBoxDemo", JSON.stringify({ score, rounds, best }));
+    } catch {}
+  }
+
+  document.querySelectorAll("[data-game]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedGame = button.dataset.game;
+      memoryTarget = null;
+      document.querySelectorAll("[data-game]").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item === button));
+      });
+      resultEl.textContent = selectedGame === "memory"
+        ? "Watch the pattern, then repeat it!"
+        : "Ready when you are!";
+      messageEl.textContent = "";
+    });
+  });
+
+  function play() {
+    rounds++;
+    let points = 0;
+    let won = false;
+
+    if (selectedGame === "cards") {
+      const card = Math.floor(Math.random() * 13) + 1;
+      const label = card === 1 ? "A" : card === 11 ? "J" : card === 12 ? "Q" : card === 13 ? "K" : card;
+      won = card >= 8;
+      points = won ? 10 : 0;
+      resultEl.textContent = `🃏 You drew ${label}`;
+    } else if (selectedGame === "dice") {
+      const a = Math.floor(Math.random() * 6) + 1;
+      const b = Math.floor(Math.random() * 6) + 1;
+      won = a + b >= 8;
+      points = won ? 10 : 0;
+      resultEl.textContent = `🎲 ${a} + ${b} = ${a + b}`;
+    } else if (selectedGame === "roulette") {
+      const number = Math.floor(Math.random() * 37);
+      won = number === 0;
+      points = won ? 25 : 0;
+      resultEl.textContent = number === 0 ? "🎡 🟢 Green 0!" : `🎡 ${number} · ${number % 2 ? "Red" : "Black"}`;
+    } else {
+      if (memoryTarget === null) {
+        memoryTarget = Math.floor(Math.random() * 4);
+        const symbols = ["🔴", "🔵", "🟡", "🟢"];
+        resultEl.textContent = `Remember: ${symbols[memoryTarget]}`;
+        messageEl.textContent = "Now tap PLAY to test your memory.";
+        render();
+        return;
+      }
+      const guess = Math.floor(Math.random() * 4);
+      const symbols = ["🔴", "🔵", "🟡", "🟢"];
+      won = guess === memoryTarget;
+      points = won ? 15 : 0;
+      resultEl.textContent = `Pattern: ${symbols[memoryTarget]} · Your color: ${symbols[guess]}`;
+      memoryTarget = null;
+    }
+
+    score += points;
+    best = Math.max(best, score);
+    messageEl.textContent = won ? `Nice! +${points} points` : "No points this round—try again!";
+    render();
+  }
+
+  $("playButton").addEventListener("click", play);
+  $("resetButton").addEventListener("click", () => {
+    score = 0;
+    rounds = 0;
+    best = 0;
+    memoryTarget = null;
+    resultEl.textContent = "Score reset. Pick a game and play!";
+    messageEl.textContent = "";
+    render();
+  });
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    installButton.style.display = "block";
+  });
+  installButton.addEventListener("click", async () => {
+    if (!deferredInstallPrompt) {
+      messageEl.textContent = "Use your browser menu and choose “Add to Home Screen”.";
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    installButton.style.display = "none";
+  });
+
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
